@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>知行小酒馆 E234 · AI 漫画摘要预览</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+      background: linear-gradient(180deg, #fff8f0 0%, #f5f0ff 100%);
+      color: #1a1a1a;
+      padding: 24px;
+    }
+    header { text-align: center; max-width: 720px; margin: 0 auto 32px; }
+    h1 { font-size: 1.5rem; margin-bottom: 8px; }
+    .meta { color: #666; line-height: 1.6; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 16px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+    }
+    .card h2 { font-size: 0.95rem; color: #ff6b35; margin: 0 0 12px; }
+    .card img {
+      width: 100%;
+      border-radius: 12px;
+      display: block;
+      border: 1px solid #eee;
+    }
+    .tip {
+      max-width: 720px;
+      margin: 0 auto 24px;
+      padding: 12px 16px;
+      background: #fff;
+      border-radius: 12px;
+      color: #666;
+      font-size: 0.9rem;
+      line-height: 1.6;
+    }
+    code { background: #f5f5f5; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>知行小酒馆 E234 · AI 漫画摘要</h1>
+    <p class="meta">
+      当我不再被工作定义！5 个普通人的价值感重建时刻<br />
+      共 8 张卡片 · sketch 简笔漫画风
+    </p>
+  </header>
+  <p class="tip">
+    若图片未显示，请先生成卡片：<code>xyz-cards comic &lt;episode_id&gt; -o ./output-comic</code>
+  </p>
+  <div class="grid" id="grid"></div>
+  <script>
+    const files = [
+      "00_comic_mic.png",
+      "01_comic_think.png",
+      "02_comic_heart.png",
+      "03_comic_hug.png",
+      "04_comic_think.png",
+      "05_comic_heart.png",
+      "06_comic_heart.png",
+      "07_comic_cheer.png",
+    ];
+    document.getElementById("grid").innerHTML = files
+      .map(
+        (name, i) => `
+        <section class="card">
+          <h2>${i + 1}/8 · ${name}</h2>
+          <img src="${name}" alt="${name}" loading="lazy" />
+        </section>`
+      )
+      .join("");
+  </script>
+</body>
+</html>

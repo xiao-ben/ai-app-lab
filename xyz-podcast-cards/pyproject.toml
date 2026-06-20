@@ -1,0 +1,46 @@
+[project]
+name = "xyz-podcast-cards"
+version = "0.1.0"
+description = "Extract Xiaoyuzhou FM podcast episodes and generate shareable image-text cards"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "xyz-podcast-cards contributors" }]
+keywords = ["xiaoyuzhou", "podcast", "cards", "image"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Multimedia :: Sound/Audio",
+]
+dependencies = [
+    "beautifulsoup4>=4.12.0",
+    "httpx>=0.27.0",
+    "pillow>=10.4.0",
+    "pydantic>=2.8.0",
+    "typer>=0.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-httpx>=0.30.0",
+]
+
+[project.scripts]
+xyz-cards = "xyz_podcast_cards.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["xyz_podcast_cards"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/xyz_podcast_cards" = "xyz_podcast_cards"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
