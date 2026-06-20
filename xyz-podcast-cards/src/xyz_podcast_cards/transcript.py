@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import Any
 
 import httpx
 
 from .fetcher import DEFAULT_HEADERS
 from .models import Credentials
+from .transcript_models import TranscriptDocument, TranscriptSegment
 
 API_BASE = "https://api.xiaoyuzhoufm.com"
 
@@ -16,7 +16,9 @@ class TranscriptError(RuntimeError):
     pass
 
 
-def load_credentials(path: str | Path) -> Credentials:
+def load_credentials(path: str | Any) -> Credentials:
+    from pathlib import Path
+
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     return Credentials.model_validate(data)
 
@@ -47,28 +49,47 @@ def _extract_transcript_url(payload: dict[str, Any]) -> str:
     raise TranscriptError("接口响应中未找到 transcriptUrl")
 
 
-def _segments_to_paragraphs(segments: list[dict[str, Any]], *, group_size: int = 6) -> list[str]:
-    texts = [str(item.get("text", "")).strip() for item in segments if item.get("text")]
-    paragraphs: list[str] = []
-    buffer: list[str] = []
-    for text in texts:
-        buffer.append(text)
-        if len(buffer) >= group_size:
-            paragraphs.append("".join(buffer))
-            buffer = []
-    if buffer:
-        paragraphs.append("".join(buffer))
-    return paragraphs
+def _parse_segments(payload: Any) -> list[TranscriptSegment]:
+    if isinstance(payload, list):
+        raw_items = payload
+    elif isinstance(payload, dict):
+        raw_items = None
+        for key in ("data", "segments", "body", "content", "items"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                raw_items = value
+                break
+        if raw_items is None:
+            raise TranscriptError("无法解析逐字稿 JSON 结构")
+    else:
+        raise TranscriptError("无法解析逐字稿 JSON 结构")
+
+    segments: list[TranscriptSegment] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        text = str(item.get("text", "")).strip()
+        if not text:
+            continue
+        segments.append(
+            TranscriptSegment(
+                text=text,
+                start_ms=int(item.get("startTime") or item.get("start") or item.get("begin") or 0),
+                end_ms=int(item.get("endTime") or item.get("end") or item.get("finish") or 0),
+                speaker=str(item.get("speaker") or item.get("role") or ""),
+            )
+        )
+    return segments
 
 
-def fetch_transcript_paragraphs(
+def fetch_transcript_document(
     *,
     eid: str,
     media_id: str,
+    title: str,
     credentials: Credentials,
     client: httpx.Client | None = None,
-    group_size: int = 6,
-) -> list[str]:
+) -> TranscriptDocument:
     if not credentials.access_token or not credentials.device_id:
         raise TranscriptError("获取逐字稿需要 credentials.json 中的 access_token 与 device_id")
 
@@ -95,19 +116,30 @@ def fetch_transcript_paragraphs(
             },
         )
         transcript_response.raise_for_status()
-        payload = transcript_response.json()
-
-        if isinstance(payload, list):
-            return _segments_to_paragraphs(payload, group_size=group_size)
-
-        for key in ("data", "segments", "body", "content", "items"):
-            value = payload.get(key) if isinstance(payload, dict) else None
-            if isinstance(value, list):
-                return _segments_to_paragraphs(value, group_size=group_size)
-
-        raise TranscriptError("无法解析逐字稿 JSON 结构")
+        segments = _parse_segments(transcript_response.json())
+        if not segments:
+            raise TranscriptError("逐字稿为空")
+        return TranscriptDocument(eid=eid, title=title, media_id=media_id, segments=segments)
     except httpx.HTTPError as exc:
         raise TranscriptError(f"下载逐字稿失败: {exc}") from exc
     finally:
         if owns_client and client is not None:
             client.close()
+
+
+def fetch_transcript_paragraphs(
+    *,
+    eid: str,
+    media_id: str,
+    credentials: Credentials,
+    client: httpx.Client | None = None,
+    group_size: int = 6,
+) -> list[str]:
+    document = fetch_transcript_document(
+        eid=eid,
+        media_id=media_id,
+        title="",
+        credentials=credentials,
+        client=client,
+    )
+    return document.paragraphs(group_size=group_size)

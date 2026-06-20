@@ -40,7 +40,7 @@ xyz-cards xiaohei <episode_id> -o ./output-xiaohei --assets ./assets/e234-xiaohe
 
 ### 使用逐字稿（可选）
 
-部分单集提供官方逐字稿，需要小宇宙 App 登录凭证：
+部分单集提供官方逐字稿，需要小宇宙 App 登录凭证。复制 `credentials.example.json` 为 `credentials.json` 并填入：
 
 ```json
 {
@@ -50,6 +50,13 @@ xyz-cards xiaohei <episode_id> -o ./output-xiaohei --assets ./assets/e234-xiaohe
 ```
 
 ```bash
+# 仅下载逐字稿
+xyz-cards transcript <episode_id> --credentials ./credentials.json -o ./output-transcript
+
+# 一键流水线：逐字稿 → 文本摘要 → 图文卡 + 漫画卡
+xyz-cards pipeline <episode_id> --credentials ./credentials.json -o ./output-pipeline --style both
+
+# 从逐字稿生成普通图文卡
 xyz-cards extract <episode_id> --source transcript --credentials ./credentials.json -o ./output
 ```
 

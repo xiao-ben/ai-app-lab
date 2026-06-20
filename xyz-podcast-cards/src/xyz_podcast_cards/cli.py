@@ -10,9 +10,10 @@ from .comic_renderer import render_comic_cards
 from .content import build_segments_from_episode
 from .fetcher import FetchError, fetch_episode, format_duration, format_pub_date
 from .models import RenderOptions
+from .pipeline import resolve_credentials, run_transcript_pipeline
 from .renderer import render_cards
 from .summarizer import summarize_episode
-from .transcript import TranscriptError, fetch_transcript_paragraphs, load_credentials
+from .transcript import TranscriptError, fetch_transcript_document, load_credentials
 from .xiaohei_renderer import prepare_xiaohei_output
 from .xiaohei_shots import build_xiaohei_shots
 
@@ -27,6 +28,97 @@ class ContentSource(str, Enum):
     description = "description"
     shownotes = "shownotes"
     transcript = "transcript"
+
+
+class CardStyle(str, Enum):
+    extract = "extract"
+    comic = "comic"
+    both = "both"
+
+
+@app.command("transcript")
+def transcript_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-transcript"), "--output", "-o", help="逐字稿输出目录"),
+    credentials: Optional[Path] = typer.Option(None, "--credentials", help="小宇宙 credentials.json"),
+) -> None:
+    """下载并解析官方逐字稿（txt / json / srt）。"""
+    try:
+        episode_info = fetch_episode(episode)
+        cred_path = resolve_credentials(credentials)
+        creds = load_credentials(cred_path)
+    except (FetchError, FileNotFoundError, OSError, ValueError) as exc:
+        typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not episode_info.transcript_media_id:
+        typer.secho("该单集没有可用的官方逐字稿", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        document = fetch_transcript_document(
+            eid=episode_info.eid,
+            media_id=episode_info.transcript_media_id,
+            title=episode_info.title,
+            credentials=creds,
+        )
+    except TranscriptError as exc:
+        typer.secho(f"逐字稿获取失败: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    from .pipeline import save_transcript_files
+
+    output.mkdir(parents=True, exist_ok=True)
+    paths = save_transcript_files(document, output)
+    typer.secho(f"已保存逐字稿，共 {len(document.segments)} 句", fg=typer.colors.GREEN)
+    for name, path in paths.items():
+        typer.echo(f"  - {name}: {path.name}")
+
+
+@app.command("pipeline")
+def pipeline_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-pipeline"), "--output", "-o", help="输出目录"),
+    credentials: Optional[Path] = typer.Option(None, "--credentials", help="小宇宙 credentials.json"),
+    style: CardStyle = typer.Option(CardStyle.both, "--style", help="生成卡片类型：extract/comic/both"),
+    max_chars: int = typer.Option(280, "--max-chars", help="单张卡片最大字符数"),
+) -> None:
+    """逐字稿 → 文本摘要 → 图文/漫画卡片 一键流水线。"""
+    try:
+        episode_info = fetch_episode(episode)
+        cred_path = resolve_credentials(credentials)
+        creds = load_credentials(cred_path)
+    except (FetchError, FileNotFoundError, OSError, ValueError) as exc:
+        typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if not episode_info.transcript_media_id:
+        typer.secho("该单集没有可用的官方逐字稿", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        result = run_transcript_pipeline(
+            episode_info,
+            credentials=creds,
+            output_dir=output,
+            card_style=style.value,
+            max_chars=max_chars,
+        )
+    except TranscriptError as exc:
+        typer.secho(f"流水线失败: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    summary = result["summary"]
+    typer.secho("流水线完成", fg=typer.colors.GREEN)
+    typer.echo(f"核心问题: {summary.core_question}")
+    typer.echo(f"输出目录: {output.resolve()}")
+    typer.echo("  - transcript.txt / transcript.json / transcript.srt")
+    typer.echo("  - summary.md / summary.json")
+    cards = result.get("cards", {})
+    if "extract" in cards:
+        typer.echo(f"  - cards-extract/ ({len(cards['extract'])} 张)")
+    if "comic" in cards:
+        typer.echo(f"  - cards-comic/ ({len(cards['comic'])} 张)")
 
 
 @app.command("extract")
@@ -63,13 +155,16 @@ def extract_command(
             typer.secho("该单集没有可用的逐字稿 media id", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1)
         try:
-            creds = load_credentials(credentials)
+            cred_path = resolve_credentials(credentials)
+            creds = load_credentials(cred_path)
+            from .transcript import fetch_transcript_paragraphs
+
             transcript_paragraphs = fetch_transcript_paragraphs(
                 eid=episode_info.eid,
                 media_id=episode_info.transcript_media_id,
                 credentials=creds,
             )
-        except (TranscriptError, OSError, ValueError) as exc:
+        except (TranscriptError, FileNotFoundError, OSError, ValueError) as exc:
             typer.secho(f"逐字稿获取失败: {exc}", fg=typer.colors.RED, err=True)
             raise typer.Exit(code=1) from exc
 
