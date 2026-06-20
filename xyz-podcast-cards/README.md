@@ -33,6 +33,9 @@ xyz-cards extract <episode_id> -o ./output --max-chars 220
 
 # AI 摘要 + 简笔漫画风精致卡片（sketch 小人）
 xyz-cards comic <episode_id> -o ./output-comic
+
+# Ian 小黑怪诞正文配图（16:9 白底手绘，见 skills/ian-xiaohei-illustrations）
+xyz-cards xiaohei <episode_id> -o ./output-xiaohei --assets ./assets/e234-xiaohei-illustrations
 ```
 
 ### 使用逐字稿（可选）

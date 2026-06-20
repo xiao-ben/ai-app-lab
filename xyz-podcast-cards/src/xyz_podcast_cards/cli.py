@@ -13,6 +13,8 @@ from .models import RenderOptions
 from .renderer import render_cards
 from .summarizer import summarize_episode
 from .transcript import TranscriptError, fetch_transcript_paragraphs, load_credentials
+from .xiaohei_renderer import prepare_xiaohei_output
+from .xiaohei_shots import build_xiaohei_shots
 
 app = typer.Typer(
     add_completion=False,
@@ -130,6 +132,61 @@ def comic_command(
 
     typer.secho(
         f"已生成 {len(saved)} 张漫画卡片 · 播客: {episode_info.podcast.title if episode_info.podcast else '未知'}",
+        fg=typer.colors.GREEN,
+    )
+    typer.echo(f"核心问题: {summary.core_question}")
+    typer.echo(f"输出目录: {output.resolve()}")
+    for path in saved:
+        typer.echo(f"  - {path.name}")
+
+
+@app.command("xiaohei")
+def xiaohei_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-xiaohei"), "--output", "-o", help="小黑配图输出目录"),
+    prompts_only: bool = typer.Option(False, "--prompts-only", help="仅输出 shot list 与提示词，不生图"),
+    assets: Optional[Path] = typer.Option(
+        None,
+        "--assets",
+        help="已生成图片目录（按 shot 文件名复制到 output）",
+    ),
+) -> None:
+    """Ian 小黑怪诞正文配图 Skill：AI 摘要 + 16:9 白底手绘配图。"""
+    try:
+        episode_info = fetch_episode(episode)
+    except FetchError as exc:
+        typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    summary = summarize_episode(episode_info)
+    shots = build_xiaohei_shots(episode_info, summary)
+    output.mkdir(parents=True, exist_ok=True)
+
+    if prompts_only:
+        from .xiaohei_renderer import save_shot_list, write_preview_html
+
+        save_shot_list(shots, output, episode=episode_info, summary=summary)
+        write_preview_html(shots, output, title=episode_info.title)
+        typer.secho(f"已输出 {len(shots)} 条 shot list → {output.resolve()}", fg=typer.colors.GREEN)
+        typer.echo("请使用图像模型按 shot-list.json 中的 prompt 逐张生成。")
+        return
+
+    saved, _ = prepare_xiaohei_output(
+        episode_info,
+        output,
+        summary=summary,
+        assets_source=assets,
+    )
+    if not saved:
+        typer.secho(
+            "未找到已生成图片。请先使用图像模型生成，或通过 --assets 指定图片目录。",
+            fg=typer.colors.YELLOW,
+        )
+        typer.echo(f"已写入 shot-list.json 与 preview.html → {output.resolve()}")
+        return
+
+    typer.secho(
+        f"已准备 {len(saved)} 张小黑配图 · 播客: {episode_info.podcast.title if episode_info.podcast else '未知'}",
         fg=typer.colors.GREEN,
     )
     typer.echo(f"核心问题: {summary.core_question}")

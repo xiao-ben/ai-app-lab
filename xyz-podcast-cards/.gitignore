@@ -9,5 +9,7 @@ build/
 .mypy_cache/
 .ruff_cache/
 output/
+output-comic/
+output-xiaohei/
 credentials.json
 .env
