@@ -7,6 +7,7 @@
 - 免登录提取公开单集元数据（标题、ShowNotes、封面、时长等）
 - 自动按章节/段落拆分内容，生成多张 1080×1440 卡片
 - 可选使用登录凭证拉取官方逐字稿生成卡片
+- 免登录下载音频 + faster-whisper 本地 ASR 转写口播文稿
 - 导出 `episode.json` 元数据
 
 ## 快速开始
@@ -51,6 +52,26 @@ xyz-cards pipeline-public <episode_id> -o ./output-public --style both
 ```
 
 > 说明：免登录拿到的是**节目说明/时间轴文稿**，不是口播 ASR 官方逐字稿。xyz-dl 同样在免登录模式下不拉字幕。
+
+### 下载音频 + ASR 转写（免登录口播文稿）
+
+参考开源项目 [casts_down](https://github.com/host452b/casts_down) 与 [podcast-transcription-skill](https://github.com/fleurytian/podcast-transcription-skill)：从公开页下载音频，再用 **faster-whisper** 本地转写为口播逐字稿。
+
+```bash
+# 安装 ASR 依赖（含 faster-whisper）
+pip install -e ".[asr]"
+
+# 仅下载音频（多为 .m4a）
+xyz-cards download-audio <episode_id> -o ./output-audio
+
+# 转写为逐字稿（可传入本地音频路径）
+xyz-cards asr <episode_id> -o ./output-asr --model small --device cpu
+
+# 一键流水线：下载 → whisper 转写 → 摘要 → 卡片
+xyz-cards pipeline-asr <episode_id> -o ./output-asr --style both --model small
+```
+
+> 说明：长单集（如 2–3 小时播客）在 CPU 上转写可能耗时数小时；有 GPU 时可 `--device cuda`。`small` 模型在中文播客上速度与质量较均衡，`tiny` 更快但准确率较低。
 
 ### 使用官方逐字稿（需凭证）
 

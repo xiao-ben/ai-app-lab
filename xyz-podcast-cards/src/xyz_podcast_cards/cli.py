@@ -10,11 +10,13 @@ from .comic_renderer import render_comic_cards
 from .content import build_segments_from_episode
 from .fetcher import FetchError, fetch_episode, format_duration, format_pub_date
 from .models import RenderOptions
-from .pipeline import resolve_credentials, run_public_pipeline, run_transcript_pipeline
+from .pipeline import resolve_credentials, run_asr_pipeline, run_public_pipeline, run_transcript_pipeline
 from .public_script import PublicScriptError, build_public_script_document
 from .renderer import render_cards
 from .summarizer import summarize_episode
 from .transcript import TranscriptError, fetch_transcript_document, load_credentials
+from .audio_downloader import AudioDownloadError, download_episode_audio
+from .asr import AsrError, transcribe_audio_file
 from .xiaohei_renderer import prepare_xiaohei_output
 from .xiaohei_shots import build_xiaohei_shots
 
@@ -349,6 +351,122 @@ def xiaohei_command(
     typer.echo(f"输出目录: {output.resolve()}")
     for path in saved:
         typer.echo(f"  - {path.name}")
+
+
+@app.command("download-audio")
+def download_audio_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-audio"), "--output", "-o", help="音频输出目录"),
+) -> None:
+    """免登录下载单集音频（多为 m4a，参考 casts_down / xyz-dl 公开页方案）。"""
+    try:
+        episode_info = fetch_episode(episode)
+        audio_path = download_episode_audio(episode_info, output)
+    except (FetchError, AudioDownloadError) as exc:
+        typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.secho(f"已下载音频: {audio_path.resolve()}", fg=typer.colors.GREEN)
+    typer.echo(f"时长: {format_duration(episode_info.duration_sec)}")
+
+
+@app.command("asr")
+def asr_command(
+    target: str = typer.Argument(..., help="小宇宙单集链接/episode_id，或本地音频文件路径"),
+    output: Path = typer.Option(Path("./output-asr"), "--output", "-o", help="转写输出目录"),
+    model: str = typer.Option("small", "--model", help="faster-whisper 模型：tiny/base/small/medium/large-v3"),
+    device: str = typer.Option("auto", "--device", help="推理设备：auto/cpu/cuda"),
+    language: str = typer.Option("zh", "--language", help="语言代码"),
+) -> None:
+    """使用 faster-whisper 本地转写音频为逐字稿（参考 casts_down）。"""
+    from .pipeline import save_transcript_files
+
+    audio_path: Path
+    eid = ""
+    title = ""
+
+    candidate = Path(target)
+    if candidate.exists() and candidate.is_file():
+        audio_path = candidate
+        eid = candidate.stem
+        title = candidate.stem
+    else:
+        try:
+            episode_info = fetch_episode(target)
+        except FetchError as exc:
+            typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        try:
+            audio_path = download_episode_audio(episode_info, output / "audio")
+        except AudioDownloadError as exc:
+            typer.secho(f"音频下载失败: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        eid = episode_info.eid
+        title = episode_info.title
+
+    try:
+        document = transcribe_audio_file(
+            audio_path,
+            eid=eid,
+            title=title,
+            model_name=model,
+            device=device,
+            language=language,
+        )
+    except AsrError as exc:
+        typer.secho(f"转写失败: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    output.mkdir(parents=True, exist_ok=True)
+    paths = save_transcript_files(document, output)
+    typer.secho(f"转写完成，共 {len(document.segments)} 段", fg=typer.colors.GREEN)
+    typer.echo(f"来源: faster-whisper ({model})")
+    for name, path in paths.items():
+        typer.echo(f"  - {name}: {path.name}")
+
+
+@app.command("pipeline-asr")
+def pipeline_asr_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-asr"), "--output", "-o", help="输出目录"),
+    style: CardStyle = typer.Option(CardStyle.both, "--style", help="生成卡片类型：extract/comic/both"),
+    max_chars: int = typer.Option(280, "--max-chars", help="单张卡片最大字符数"),
+    model: str = typer.Option("small", "--model", help="faster-whisper 模型"),
+    device: str = typer.Option("auto", "--device", help="推理设备：auto/cpu/cuda"),
+    language: str = typer.Option("zh", "--language", help="语言代码"),
+    keep_audio: bool = typer.Option(True, "--keep-audio/--no-keep-audio", help="转写后是否保留音频文件"),
+) -> None:
+    """免登录流水线：下载音频 → whisper 转写 → 摘要 → 卡片。"""
+    try:
+        episode_info = fetch_episode(episode)
+        result = run_asr_pipeline(
+            episode_info,
+            output_dir=output,
+            card_style=style.value,
+            max_chars=max_chars,
+            model_name=model,
+            device=device,
+            language=language,
+            keep_audio=keep_audio,
+        )
+    except (FetchError, AudioDownloadError, AsrError) as exc:
+        typer.secho(f"流水线失败: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    summary = result["summary"]
+    typer.secho("ASR 流水线完成", fg=typer.colors.GREEN)
+    typer.echo("文稿来源: faster-whisper 本地转写（口播 ASR，非官方逐字稿）")
+    typer.echo(f"核心问题: {summary.core_question}")
+    typer.echo(f"输出目录: {output.resolve()}")
+    if keep_audio:
+        typer.echo(f"  - audio/{result['audio'].name}")
+    typer.echo("  - transcript.txt / transcript.json / transcript.srt")
+    typer.echo("  - summary.md / summary.json")
+    cards = result.get("cards", {})
+    if "extract" in cards:
+        typer.echo(f"  - cards-extract/ ({len(cards['extract'])} 张)")
+    if "comic" in cards:
+        typer.echo(f"  - cards-comic/ ({len(cards['comic'])} 张)")
 
 
 def main() -> None:

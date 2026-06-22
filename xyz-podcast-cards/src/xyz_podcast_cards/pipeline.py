@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from .audio_downloader import download_episode_audio
+from .asr import transcribe_audio_file
 from .comic_renderer import render_comic_cards
 from .content import build_segments_from_episode
 from .fetcher import EpisodeInfo, fetch_episode
@@ -202,5 +204,60 @@ def run_transcript_pipeline(
     episode_json = output_path / "episode.json"
     episode_json.write_text(episode.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
     result["episode_json"] = episode_json
+    return result
+
+
+def run_asr_pipeline(
+    episode: EpisodeInfo,
+    *,
+    output_dir: str | Path,
+    card_style: Literal["extract", "comic", "both"] = "both",
+    max_chars: int = 280,
+    model_name: str = "small",
+    device: str = "auto",
+    language: str = "zh",
+    keep_audio: bool = True,
+) -> dict[str, object]:
+    """免登录下载音频 → faster-whisper 转写 → 摘要 → 卡片（参考 casts_down 方案）。"""
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    audio_path = download_episode_audio(episode, output_path / "audio")
+    document = transcribe_audio_file(
+        audio_path,
+        eid=episode.eid,
+        title=episode.title,
+        model_name=model_name,
+        device=device,
+        language=language,
+    )
+    transcript_paths = save_transcript_files(document, output_path)
+    summary = summarize_from_transcript(episode, document)
+    summary_md_path, summary_json_path = _save_summary_files(episode, document, summary, output_path)
+
+    result: dict[str, object] = {
+        "audio": audio_path,
+        "transcript": document,
+        "transcript_paths": transcript_paths,
+        "summary": summary,
+        "summary_md": summary_md_path,
+        "summary_json": summary_json_path,
+        "cards": _render_cards_from_document(
+            episode,
+            document,
+            summary,
+            output_path,
+            card_style=card_style,
+            max_chars=max_chars,
+        ),
+    }
+
+    episode_json = output_path / "episode.json"
+    episode_json.write_text(episode.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
+    result["episode_json"] = episode_json
+
+    if not keep_audio:
+        audio_path.unlink(missing_ok=True)
+
     return result
 
