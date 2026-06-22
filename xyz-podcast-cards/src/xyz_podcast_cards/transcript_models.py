@@ -13,7 +13,8 @@ class TranscriptSegment(BaseModel):
 class TranscriptDocument(BaseModel):
     eid: str
     title: str
-    media_id: str
+    media_id: str = ""
+    source: str = "official"
     segments: list[TranscriptSegment] = Field(default_factory=list)
 
     @property

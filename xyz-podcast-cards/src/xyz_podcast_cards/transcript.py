@@ -119,7 +119,13 @@ def fetch_transcript_document(
         segments = _parse_segments(transcript_response.json())
         if not segments:
             raise TranscriptError("逐字稿为空")
-        return TranscriptDocument(eid=eid, title=title, media_id=media_id, segments=segments)
+        return TranscriptDocument(
+            eid=eid,
+            title=title,
+            media_id=media_id,
+            source="official",
+            segments=segments,
+        )
     except httpx.HTTPError as exc:
         raise TranscriptError(f"下载逐字稿失败: {exc}") from exc
     finally:

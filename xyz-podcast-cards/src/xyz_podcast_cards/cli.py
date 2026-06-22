@@ -10,7 +10,8 @@ from .comic_renderer import render_comic_cards
 from .content import build_segments_from_episode
 from .fetcher import FetchError, fetch_episode, format_duration, format_pub_date
 from .models import RenderOptions
-from .pipeline import resolve_credentials, run_transcript_pipeline
+from .pipeline import resolve_credentials, run_public_pipeline, run_transcript_pipeline
+from .public_script import PublicScriptError, build_public_script_document
 from .renderer import render_cards
 from .summarizer import summarize_episode
 from .transcript import TranscriptError, fetch_transcript_document, load_credentials
@@ -41,13 +42,43 @@ def transcript_command(
     episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
     output: Path = typer.Option(Path("./output-transcript"), "--output", "-o", help="逐字稿输出目录"),
     credentials: Optional[Path] = typer.Option(None, "--credentials", help="小宇宙 credentials.json"),
+    public: bool = typer.Option(
+        False,
+        "--public",
+        help="免登录模式：从公开页 ShowNotes/时间轴提取文稿（xyz-dl 同款方案）",
+    ),
 ) -> None:
-    """下载并解析官方逐字稿（txt / json / srt）。"""
+    """下载并解析逐字稿/节目文稿（txt / json / srt）。"""
     try:
         episode_info = fetch_episode(episode)
+    except FetchError as exc:
+        typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    from .pipeline import save_transcript_files
+
+    output.mkdir(parents=True, exist_ok=True)
+
+    if public:
+        try:
+            document = build_public_script_document(episode_info)
+        except PublicScriptError as exc:
+            typer.secho(f"公开文稿获取失败: {exc}", fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        paths = save_transcript_files(document, output)
+        typer.secho(
+            f"已保存公开节目文稿（ShowNotes/时间轴），共 {len(document.segments)} 段",
+            fg=typer.colors.GREEN,
+        )
+        typer.echo("说明：这不是口播 ASR 逐字稿；如需官方逐字稿请去掉 --public 并提供 credentials。")
+        for name, path in paths.items():
+            typer.echo(f"  - {name}: {path.name}")
+        return
+
+    try:
         cred_path = resolve_credentials(credentials)
         creds = load_credentials(cred_path)
-    except (FetchError, FileNotFoundError, OSError, ValueError) as exc:
+    except (FileNotFoundError, OSError, ValueError) as exc:
         typer.secho(f"错误: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
@@ -66,13 +97,43 @@ def transcript_command(
         typer.secho(f"逐字稿获取失败: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
-    from .pipeline import save_transcript_files
-
-    output.mkdir(parents=True, exist_ok=True)
     paths = save_transcript_files(document, output)
-    typer.secho(f"已保存逐字稿，共 {len(document.segments)} 句", fg=typer.colors.GREEN)
+    typer.secho(f"已保存官方逐字稿，共 {len(document.segments)} 句", fg=typer.colors.GREEN)
     for name, path in paths.items():
         typer.echo(f"  - {name}: {path.name}")
+
+
+@app.command("pipeline-public")
+def pipeline_public_command(
+    episode: str = typer.Argument(..., help="小宇宙单集链接或 episode_id"),
+    output: Path = typer.Option(Path("./output-public"), "--output", "-o", help="输出目录"),
+    style: CardStyle = typer.Option(CardStyle.both, "--style", help="生成卡片类型：extract/comic/both"),
+    max_chars: int = typer.Option(280, "--max-chars", help="单张卡片最大字符数"),
+) -> None:
+    """免登录流水线：公开页文稿 → 文本摘要 → 卡片（xyz-dl 同款 __NEXT_DATA__ 方案）。"""
+    try:
+        episode_info = fetch_episode(episode)
+        result = run_public_pipeline(
+            episode_info,
+            output_dir=output,
+            card_style=style.value,
+            max_chars=max_chars,
+        )
+    except (FetchError, PublicScriptError) as exc:
+        typer.secho(f"流水线失败: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    summary = result["summary"]
+    typer.secho("免登录流水线完成", fg=typer.colors.GREEN)
+    typer.echo("文稿来源: 公开页 ShowNotes / 时间轴（非口播 ASR）")
+    typer.echo(f"核心问题: {summary.core_question}")
+    typer.echo(f"输出目录: {output.resolve()}")
+    typer.echo("  - transcript.txt / summary.md")
+    cards = result.get("cards", {})
+    if "extract" in cards:
+        typer.echo(f"  - cards-extract/ ({len(cards['extract'])} 张)")
+    if "comic" in cards:
+        typer.echo(f"  - cards-comic/ ({len(cards['comic'])} 张)")
 
 
 @app.command("pipeline")

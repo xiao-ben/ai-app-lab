@@ -38,7 +38,21 @@ xyz-cards comic <episode_id> -o ./output-comic
 xyz-cards xiaohei <episode_id> -o ./output-xiaohei --assets ./assets/e234-xiaohei-illustrations
 ```
 
-### 使用逐字稿（可选）
+### 免登录获取节目文稿（xyz-dl 同款方案）
+
+无需 credentials，从公开单集页的 `__NEXT_DATA__` 提取 **ShowNotes + 时间轴** 作为文稿：
+
+```bash
+# 仅下载公开文稿
+xyz-cards transcript <episode_id> --public -o ./output-public
+
+# 免登录一键流水线：文稿 → 摘要 → 卡片
+xyz-cards pipeline-public <episode_id> -o ./output-public --style both
+```
+
+> 说明：免登录拿到的是**节目说明/时间轴文稿**，不是口播 ASR 官方逐字稿。xyz-dl 同样在免登录模式下不拉字幕。
+
+### 使用官方逐字稿（需凭证）
 
 部分单集提供官方逐字稿，需要小宇宙 App 登录凭证。复制 `credentials.example.json` 为 `credentials.json` 并填入：
 
